@@ -17,12 +17,13 @@ class EfficientFrontier:
 
     def __init__(self, data, r_f=0):
         self.data = data
-        self.r_f = r_f
+        self.r_f = r_f                          
         self.mu_obs = np.mean(data, axis = 0)
         self.cov_obs = np.cov(data, rowvar = False)
         self.portfolios = {}
-        self.fitted = False
-        return
+        self.frontier = None
+
+
 
 
 
@@ -101,12 +102,11 @@ class EfficientFrontier:
         std_frontier = [np.sqrt(blas.dot(weights, S * weights)) for weights in weights_frontier]
         self.frontier = {'mu': mu_frontier, 'std': std_frontier, 'weights': weights_frontier}
 
-        self.fitted = True
 
 
     def plot_efficient_frontier(self, plot_capital_market_line = False):
-        if self.fitted == False:    
-            raise ValueError('Efficient frontier unknown. Please use the .fit() method.')
+        if self.frontier is None:    
+            raise ValueError('Efficient frontier unknown. Please use the .fit() method first.')
         
         mu_frontier = self.frontier['mu']
         std_frontier = self.frontier['std']
@@ -162,11 +162,11 @@ if __name__ == '__main__':
     std_intervals = sorted([[1,2] for i in range(n_stocks)], reverse = True)
     parameters_dict = {'mu': mu_intervals, 'sigma': std_intervals}
 
-    dg = DataGenerator(N_dim = n_stocks)
+    dg = DataGenerator(n_dim = n_stocks)
     dg.generate_parameters(parameters_dict)
     dg.generate_correlation()
 
-    data = dg.generate_data(N_samples = time_series_length)
+    data = dg.generate_data(n_samples = time_series_length)
     r_f = 0.2
 
     # Construct the efficient frontier. Plot it together with CML, optimal portfolio & min variance portfolio

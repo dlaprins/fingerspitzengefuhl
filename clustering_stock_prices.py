@@ -21,7 +21,7 @@ from data_generator import DataGenerator
 # considered to belong to the same segment (i.e., have similar distribution). 
 # In particular, both KMeans and Hierarchical Clustering are considered. 
 #
-# It is shown that in the trivial case (no correlation, distributions determined by hand) that 
+# It is shown that in the trivial case (no correlation, distributions fixed by hand) that 
 # given the correct number of clusters, both clustering algorithms correctly identify which time series
 # have identical distributions. 
 
@@ -29,8 +29,8 @@ from data_generator import DataGenerator
 
 
 def rmse(x,y):
-    rmse = np.sqrt( np.sum((x - y)**2) )
-    return  rmse
+    rmse_value = np.sqrt( np.sum((x - y)**2) )
+    return  rmse_value
 
 def anderson_darling(x,y):
     ad_value = anderson_ksamp([x,y])
@@ -41,6 +41,16 @@ def kolmogorv_smirnov(x,y):
     ks_value = ks_2samp(x,y)
     ks_value = ks_value[0]
     return ks_value
+
+
+
+def get_off_diagonal_indices(list_of_ts):
+    """
+    Given a list of time series, returns a list of all tuples (i,j) such that 
+    i, j are non-identical time series.
+    """
+    pairs = [(i,j) for i in list_of_ts for j in list_of_ts if j != i]
+    return pairs
 
 
 
@@ -66,7 +76,7 @@ def compute_metric_tensor(data, distance=anderson_darling):
     else:
         ts = data.columns
         g_ij = pd.DataFrame(0, index = ts, columns = ts)
-        pairs = [(i,j) for i in ts for j in ts if j != i]
+        pairs = get_off_diagonal_indices(ts)
         for pair in pairs: 
             x = data[pair[0]]
             y = data[pair[1]]
@@ -80,8 +90,8 @@ def compute_metric_tensor(data, distance=anderson_darling):
 
 def lookup_table(kmeans, n_clusters):
     """
-    Relabel the clusterlabels of a kmeans clustering by naming them in order of the total distance of points to the cluster center.
-    Used in order to be able to easily compare two sets of clusterlabels for different seeds
+    Relabel the cluster labels of a kmeans clustering by naming them in order of the total distance of points to the cluster center.
+    Used in order to be able to easily compare two sets of cluster labels for different seeds
     """
 
     idx = np.argsort(kmeans.cluster_centers_.sum(axis=1))
@@ -93,76 +103,14 @@ def lookup_table(kmeans, n_clusters):
 
 
 
-def fit_kmeans_clusters(metric, n_clusters_min=1, n_clusters_max=None,  method='kmeans', n_seeds=10, make_plots=False):
+def to_cluster_key(n, seed=None):
     """
-    Assign KMeans cluster label based on a metric, for any number of clusters < n_clusters_max.
-
-    Arguments
-    ---------
-    metric: pd.DataFrame
-        Symmetric matrix g_ij, i,j running over segments
-    n_clusters_max: int < len(metric)
-        Maximal number of clusters to use. For all n < n_clusters_max, clustering_labels are assigned.
-        If set to None, the number of segments -1 is used as a max.
-    n_clusters_min: int, 0 < n_clusters_min < n_clusters_max
-        Minimal number of clusters to use.
-    n_seeds: int
-        KMeans is sensitive to choice of seed. The fit runs for n_seed different seeds, then compares whether or not 
-        the fitted clusterlabels are identical or not
-
-    Returns
-    ---------
-    clusters_df: pd.DataFrame
-        Dataframe with segments as index, number of clusters as columns, clusterlabels per segment as values.
-        In case different seeds lead to different results for a certain number of clusters, labels for each seed are included.
+    Converts integer cluster label to string label as key for dictionaries.
     """
-    if n_clusters_max == None:
-        n_clusters_max = len(metric)
-    X_unnormalized = metric.to_numpy()
-    X = (X_unnormalized - np.mean(X_unnormalized)) / np.std(X_unnormalized)
-    clusters_df = pd.DataFrame(index = metric.index)
-
-    if method == 'hierarchical':
-        dendrogram = sch.dendrogram(sch.linkage(X, method = 'ward'))
-        for n in range(n_clusters_min, n_clusters_max):
-            hierarchical = AgglomerativeClustering(n_clusters = n, affinity = 'euclidean', linkage = 'ward')
-            hierarchical.fit(X)
-            clusters_df['cluster_' + str(n)] = hierarchical.labels_
-
-
-    elif method == 'kmeans':
-        clusters = {}
-        for seed in range(n_seeds):
-            clusters[seed] = {}
-            distortions = []
-            for n in range(n_clusters_min, n_clusters_max + 1):
-                kmeans = KMeans(n_clusters = n, random_state = seed)
-                kmeans.fit(X)
-                distortions.append(kmeans.inertia_)
-                clusters[seed][n] = lookup_table(kmeans, n)
-            if make_plots == True:
-                print("Seed:", seed) 
-                plt.plot(distortions)
-                plt.show()
-        
-        # For each n, check if clusters are the same for all seeds.
-        # If yes, only put the unique clusterlabels in the dataframe.
-        # If no, put a column of clusterlabels into the dataframe for each seed.
-        for n in range(n_clusters_min, n_clusters_max + 1):
-            no_seed_impact = True
-            for seed in range(1, n_seeds):
-                if (clusters[0][n] != clusters[seed][n]).any():
-                    no_seed_impact = False
-                    for seed2 in range(n_seeds):
-                        clusters_df['cluster_' + str(n)] = clusters[0][n]
-                    break
-            if no_seed_impact == True: 
-                clusters_df['cluster_' + str(n)] = clusters[0][n]
-        
-    else: 
-        raise ValueError("Unknown clustering method: currently, only 'kmeans' and 'hierarchical' are implemented.")
-
-    return clusters_df
+    key_name = f'cluster_{n}'
+    if seed:
+        key_name = f'cluster_{n}_seed_{seed}'
+    return key_name
 
 
 
@@ -184,7 +132,7 @@ def fit_clusters(metric, n_clusters_min=1, n_clusters_max=None,  method='kmeans'
         Determines which clustering algorithm to apply. Currently, 'kmeans' and 'hierarchical' are implemented.
     n_seeds: int
         KMeans is sensitive to choice of seed. The fit runs for n_seed different seeds, then compares whether or not 
-        the fitted clusterlabels are identical or not
+        the fitted cluster labels are identical or not
     make_plots: bool
         Whether or not to produce plots (elbow plots for KMeans, dendrograms for Hierarchical) to visually determine
         how many clusters to use
@@ -192,11 +140,11 @@ def fit_clusters(metric, n_clusters_min=1, n_clusters_max=None,  method='kmeans'
     Returns
     ---------
     clusters_df: pd.DataFrame
-        Dataframe with segments as index, number of clusters as columns, clusterlabels per segment as values.
+        Dataframe with segments as index, number of clusters as columns, cluster labels per segment as values.
         In case different seeds lead to different results for a certain number of clusters, labels for each seed are included.
     """
 
-    if n_clusters_max == None:
+    if n_clusters_max is None:
         n_clusters_max = len(metric)
     X_unnormalized = metric.to_numpy()
     X = (X_unnormalized - np.mean(X_unnormalized)) / np.std(X_unnormalized)
@@ -206,12 +154,9 @@ def fit_clusters(metric, n_clusters_min=1, n_clusters_max=None,  method='kmeans'
         for n in range(n_clusters_min, n_clusters_max + 1):
             hierarchical = AgglomerativeClustering(n_clusters = n, affinity = 'euclidean', linkage = 'ward')
             hierarchical.fit(X)
-            clusters_df['cluster_' + str(n)] = hierarchical.labels_
+            clusters_df[to_cluster_key(n)] = hierarchical.labels_
         if make_plots == True:
-            sch.dendrogram(sch.linkage(X, method = 'ward')) 
-            # plt.plot(dendrogram)
-            # plt.show()
-
+            sch.dendrogram(sch.linkage(X, method = 'ward'))
 
     elif method == 'kmeans':
         clusters = {}
@@ -229,21 +174,21 @@ def fit_clusters(metric, n_clusters_min=1, n_clusters_max=None,  method='kmeans'
                 plt.show()
         
         # For each n, check if clusters are the same for all seeds.
-        # If yes, only put the unique clusterlabels in the dataframe.
-        # If no, put a column of clusterlabels into the dataframe for each seed.
+        # If yes, only put the unique cluster labels in the dataframe.
+        # If no, put a column of cluster labels into the dataframe for each seed.
         for n in range(n_clusters_min, n_clusters_max + 1):
             no_seed_impact = True
             for seed in range(1, n_seeds):
                 if (clusters[0][n] != clusters[seed][n]).any():
                     no_seed_impact = False
                     for seed2 in range(n_seeds):
-                        clusters_df['cluster_' + str(n)] = clusters[0][n]
+                        clusters_df[to_cluster_key(n)] = clusters[0][n]
                     break
-            if no_seed_impact == True: 
-                clusters_df['cluster_' + str(n)] = clusters[0][n]
+            if no_seed_impact: 
+                clusters_df[to_cluster_key(n)] = clusters[0][n]
         
     else: 
-        raise ValueError("Unknown clustering method: currently, only 'kmeans' and 'hierarchical' are implemented.")
+        raise ValueError(f"Unknown clustering method {method}: currently, only 'kmeans' and 'hierarchical' are implemented.")
 
     return clusters_df
 
@@ -251,14 +196,14 @@ def fit_clusters(metric, n_clusters_min=1, n_clusters_max=None,  method='kmeans'
 
 def vote_for_cluster(cluster_df, n_clusters, n_seed=10):
     """
-    To be used in case different seeds for K-Means lead to different clusterlabels: 
-    determine clusterlabel democratically.
+    To be used in case different seeds for K-Means lead to different cluster labels: 
+    determine cluster label democratically.
     """
     df = cluster_df.copy()
-    columns = ['cluster_' + str(n_clusters) + '_seed' + str(i) for i in range(n_seed)]
+    columns = [to_cluster_key(n_clusters, seed = i) for i in range(n_seed)]
     df_n = df[columns].mode(axis = 'columns')
     df = df.drop(columns = columns)
-    df['cluster_' + str(n_clusters)] = df_n
+    df[to_cluster_key(n_clusters)] = df_n
 
     return df
 
@@ -266,15 +211,16 @@ def vote_for_cluster(cluster_df, n_clusters, n_seed=10):
 
 if __name__ == '__main__':
 
-    N_time_points = 252
+    n_time_points = 252
+    np.random.seed(0)
 
     # An arbitrary (and rather unrealistic) set of parameters defining the stock price stochastic processes
-    parameter_list = [(0,1), (0,1), (0,1), (1,1), (1,1), (0,2), (0,2), (2,1), (2,1), (0,3)]
+    parameter_list = [(0, 0.1), (0, 0.1), (0, 0.1), (0.1, 0.1), (0.1, 0.1), (0, 0.2), (0, 0.2), (0.2, 0.1), (0.2, 0.1), (0, 0.3)]
     dimension = len(parameter_list)
     mus, sigmas = zip(*parameter_list)
     parameters_dict = {'mu': np.array(mus), 'sigma': np.array(sigmas)}
     correlation_matrix = np.identity(dimension)
-    dg = DataGenerator(N_dim = dimension,
+    dg = DataGenerator(n_dim = dimension,
                         distribution_type = 'lognormal', 
                         parameters_dict = parameters_dict,
                         correlation = correlation_matrix,
@@ -282,7 +228,7 @@ if __name__ == '__main__':
                         np_to_df = True)
             
     # Simulate geometric Brownian motion stock prices using the specified parameters and correlation
-    stock_price_time_series = dg.generate_data(N_samples = N_time_points)
+    stock_price_time_series = dg.generate_data(n_samples = n_time_points)
     for i in range(dimension):
         plt.plot(stock_price_time_series.iloc[:, i], label = parameter_list[i])
     plt.xlabel('Time axis')
@@ -291,7 +237,7 @@ if __name__ == '__main__':
     plt.legend()
     plt.show()
 
-    stock_returns = stock_price_time_series.diff()
+    stock_returns = np.log(stock_price_time_series).diff()
     
     # Compute a metric between all stock returns series, then apply clustering algortihms to determine segmentation
     metric = compute_metric_tensor(stock_returns, anderson_darling)
